@@ -1,0 +1,176 @@
+package tiger.scanner;
+
+import tiger.errors.*;
+import tiger.ast.*;
+import tiger.symbol.*;
+import java_cup.runtime.Symbol;
+
+action code {:
+	private Zsymbol get_sym(TokenInfo x){
+    	return Zsymbol.symbol((String)(x.info));
+    }
+:}
+
+parser code  {: 
+	ErrorList e_list;
+	public void add_error(String m,int l,int c){
+    	if(e_list==null)
+    		throw new RuntimeException(m+" at "+l+","+c);
+    	else
+    		e_list.add_error(m,l,c,"parser");
+    }
+    
+    
+    
+    public Parser(java_cup.runtime.Scanner s,ErrorList e){
+    	this(s);
+    	e_list = e;
+    }
+    public Parser(java.io.InputStream in,ErrorList e){
+    	this(new Lexer(in,e));
+    	e_list = e;
+    }
+    
+    public void report_fatal_error(String message, Object info)throws java.lang.Exception
+    {
+      /* stop parsing (not really necessary since we throw an exception, but) */
+      done_parsing();
+      /* use the normal error message reporting to put out the message */
+      report_error(message, info);
+      /* throw an exception */
+      throw new Exception("Can't recover from previous error(s)");
+    }
+    
+    public void report_error(String m, Object info)
+    {
+    	if(e_list==null)
+    		System.err.println(m+" at "+((Symbol)info).left+","+((Symbol)info).right);
+    	else
+    		e_list.add_error(m,((Symbol)info).left,((Symbol)info).right,"parser");
+    }
+
+:};
+
+
+terminal TokenInfo ID, STRING;
+terminal TokenInfo INT;
+terminal TokenInfo COMMA, COLON, SEMICOLON, LPAREN, RPAREN, 
+	LBRACK, RBRACK, LBRACE, RBRACE, DOT, PLUS, MINUS, 
+	TIMES, DIVIDE, EQ, NEQ, LT, LE, GT, GE, AND, OR, 
+	ASSIGN, ARRAY, IF, THEN, ELSE, WHILE, FOR, TO, DO, 
+	LET, IN, END, OF, BREAK, NIL, FUNCTION, VAR, TYPE;
+terminal UMINUS;
+
+non terminal Expr expr;
+non terminal Var lvalue;
+non terminal List_expr expr_list;
+non terminal Listseq_expr expr_seq;
+non terminal List_field field_list;
+non terminal List_dec dec_list;
+non terminal Dec dec;
+non terminal Ty type;
+non terminal Listty_field tyfield_list;
+
+precedence left THEN;
+precedence left ELSE;
+precedence nonassoc ASSIGN;
+precedence right OR;
+precedence right AND;
+precedence nonassoc EQ, NEQ, LT, LE, GT, GE;
+precedence left PLUS, MINUS;
+precedence left TIMES, DIVIDE;
+precedence left LPAREN;
+precedence right UMINUS;
+
+start with expr;
+
+expr ::= STRING:t {: RESULT = new Expr_str(t.line,t.column,(String)t.info); :}
+	   | INT:t	  {: RESULT = new Expr_int(t.line,t.column,(Integer)t.info); :}
+	   | NIL:t	  {: RESULT = new Expr_nil(t.line,t.column); :}
+	   | lvalue:v {: RESULT = new Expr_var(v.line,v.column,v); :}
+	   | MINUS:t expr:e {: RESULT = new Expr_neg(t.line,t.column,e); :} %prec UMINUS
+	   
+	   | expr:e1 PLUS:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.PLUS,e1,e2); :}
+	   | expr:e1 MINUS:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.MINUS,e1,e2); :}
+	   | expr:e1 TIMES:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.MUL,e1,e2); :}
+	   | expr:e1 DIVIDE:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.DIV,e1,e2); :}
+	   | expr:e1 EQ:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.EQ,e1,e2); :}
+	   | expr:e1 NEQ:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.NE,e1,e2); :}
+	   | expr:e1 LT:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.LT,e1,e2); :}
+	   | expr:e1 LE:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.LE,e1,e2); :}
+	   | expr:e1 GT:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.GT,e1,e2); :}
+	   | expr:e1 GE:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.GE,e1,e2); :}
+	   | expr:e1 AND:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.AND,e1,e2); :}
+	   | expr:e1 OR:t expr:e2 {: RESULT = new Expr_op(t.line,t.column,Expr_op.OR,e1,e2); :}
+	   
+	   | lvalue:v ASSIGN:t expr:e {: RESULT = new Expr_assign(t.line,t.column,v,e); :}
+	   
+	   | ID:i LPAREN RPAREN {: RESULT = new Expr_app(i.line,i.column,get_sym(i),null); :}
+	   | ID:i LPAREN expr_list:l RPAREN {: RESULT = new Expr_app(i.line,i.column,get_sym(i),l); :}
+	   
+	   | LPAREN:t RPAREN {: RESULT = new Expr_seq(t.line,t.column,null); :}
+	   | LPAREN:t expr_seq:s RPAREN {: RESULT = new Expr_seq(t.line,t.column,s); :}
+	   
+	   | ID:i LBRACE RBRACE {: RESULT = new Expr_struct(i.line,i.column,get_sym(i),null); :}
+	   | ID:i LBRACE field_list:l RBRACE {: RESULT = new Expr_struct(i.line,i.column,get_sym(i),l); :}
+	   
+	   | lvalue:i LBRACK expr:e RBRACK OF expr:e2 {: 
+	   						if(!(i instanceof Var_id)){	//error
+	   							this.parser.add_error("Syntax_error",i.line,i.column);
+	   							throw new Exception("Can't recover from previous error(s)");
+	   						}
+	   						RESULT = new Expr_array(i.line,i.column,((Var_id)i).sym,e,e2); 
+	   					:}
+	   					
+	   | IF:i expr:e1 THEN expr:e2 {: RESULT = new Expr_ifthen(i.line,i.column,e1,e2); :}
+	   | IF:i expr:e1 THEN expr:e2 ELSE expr:e3 {: RESULT = new Expr_ifelse(i.line,i.column,e1,e2,e3); :}
+	   | WHILE:i expr:e1 DO expr:e2 {: RESULT = new Expr_while(i.line,i.column,e1,e2); :}
+	   | FOR:i ID:id ASSIGN expr:e1 TO expr:e2 DO expr:e3 {: RESULT = new Expr_for(i.line,i.column,get_sym(id),e1,e2,e3); :}
+	   | BREAK:i {: RESULT = new Expr_break(i.line,i.column); :}
+	   
+	   | LET:i dec_list:l IN END {: RESULT = new Expr_let(i.line,i.column,l,null); :}
+	   | LET:i dec_list:l IN expr_seq:s END {: RESULT = new Expr_let(i.line,i.column,l,s); :}
+	   ;
+	   
+lvalue ::= ID:i {: RESULT = new Var_id(i.line,i.column,get_sym(i)); :}
+		 | lvalue:v DOT ID:i {: RESULT = new Var_field(v.line,v.column,v,get_sym(i)); :}
+		 | lvalue:v LBRACK expr:e RBRACK {: RESULT = new Var_index(v.line,v.column,v,e); :}
+		 ;
+		 
+expr_seq ::= expr:e	{: RESULT = new Listseq_expr(e); :}
+		   | expr_seq:s SEMICOLON expr:e {: RESULT = new Listseq_expr(e,s); :}
+		   ;
+		   
+expr_list ::= expr:e {: RESULT = new List_expr(e); :}
+			| expr_list:l COMMA expr:e {: RESULT = new List_expr(e,l); :}
+			;
+			
+field_list ::= ID:i EQ expr:e {: RESULT = new List_field(new Field(i.line,i.column,get_sym(i),e)); :}
+			 | field_list:fl COMMA ID:i EQ expr:e {: RESULT = new List_field(new Field(i.line,i.column,get_sym(i),e),fl); :}
+			 ;
+			 
+dec_list ::= dec:d {: RESULT = new List_dec(d); :}
+		   | dec_list:l dec:d {: RESULT = new List_dec(d,l); :}
+		   ;
+
+dec ::= VAR:var ID:i ASSIGN expr:e {: RESULT = new Dec_var(var.line,var.column,get_sym(i),e,null); :}
+      | VAR:var ID:i COLON ID:tid ASSIGN expr:e {: RESULT = new Dec_var(var.line,var.column,get_sym(i),e,get_sym(tid)); :}
+      
+      | FUNCTION:f ID:i LPAREN RPAREN EQ expr:e {: RESULT = new Dec_fun(f.line,f.column,get_sym(i),e,null,null); :}
+      | FUNCTION:f ID:i LPAREN tyfield_list:l RPAREN EQ expr:e {: RESULT = new Dec_fun(f.line,f.column,get_sym(i),e,l,null); :}
+      | FUNCTION:f ID:i LPAREN RPAREN COLON ID:tid EQ expr:e {: RESULT = new Dec_fun(f.line,f.column,get_sym(i),e,null,get_sym(tid)); :}
+      | FUNCTION:f ID:i LPAREN tyfield_list:l RPAREN COLON ID:tid EQ expr:e {: RESULT = new Dec_fun(f.line,f.column,get_sym(i),e,l,get_sym(tid)); :}
+      
+      | TYPE:t ID:i EQ type:ty {: RESULT = new Dec_type(t.line,t.column,get_sym(i),ty); :}
+      ;
+      
+type ::= ID:i {: RESULT = new Ty_id(i.line,i.column,get_sym(i)); :}
+	   | LBRACE:l RBRACE {: RESULT = new Ty_struct(l.line,l.column,null); :}
+	   | LBRACE:l tyfield_list:li RBRACE {: RESULT = new Ty_struct(l.line,l.column,li); :}
+	   | ARRAY:a OF ID:i {: RESULT = new Ty_array(a.line,a.column,get_sym(i)); :}
+	   ;
+	   
+tyfield_list ::= ID:i COLON ID:tid {: RESULT = new Listty_field(new Field_ty(i.line,i.column,get_sym(i),get_sym(tid))); :}
+			   | tyfield_list:l COMMA ID:i COLON ID:tid {: RESULT = new Listty_field(new Field_ty(i.line,i.column,get_sym(i),get_sym(tid)),l); :}
+			   ;
+      
